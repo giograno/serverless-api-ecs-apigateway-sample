@@ -56,6 +56,16 @@ jobs:
           sleep 10
           awslocal apigatewayv2 get-apis
           awslocal cognito-idp list-user-pools --max-results 1
+      - name: Seed test environment with Cloud Pod
+        run: |
+          localstack pod load https://raw.githubusercontent.com/giograno/serverless-api-ecs-apigateway-sample/main/cloud-pods-seed-tests/bootstrap
+          sleep 10
+      - name: Run tests
+        run: |
+          cd tests
+          pip install pytest
+          pip install boto3
+          pytest .
 
   cloudformation:
     name: Deploy infrastructure using CloudFormation
@@ -99,3 +109,13 @@ jobs:
           sleep 10
           awslocal apigatewayv2 get-apis
           awslocal cognito-idp list-user-pools --max-results 1
+      - name: Seed test environment with Cloud Pod
+        run: |
+          localstack pod load https://raw.githubusercontent.com/giograno/serverless-api-ecs-apigateway-sample/main/cloud-pods-seed-tests/bootstrap
+          sleep 10
+      - name: Run tests
+        run: |
+          cd tests
+          pip install pytest
+          pip install boto3
+          pytest .

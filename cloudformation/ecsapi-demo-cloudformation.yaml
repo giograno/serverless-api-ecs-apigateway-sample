@@ -85,6 +85,7 @@ Resources:
   DynamoDBTableFoodstoreFoods:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: TablePetstoreFood
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: foodId
@@ -96,6 +97,7 @@ Resources:
   DynamoDBTablePetstorePets:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: TablePetstorePets
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: petId

@@ -146,6 +146,39 @@ Alternatively, you can use the AWS CLI to query the table data. For example, to 
 awslocal dynamodb scan --table-name FoodStoreFoods
 ```
 
+
+### Write a small unit test
+
+To test our application, we could write a simple unit test in Python.
+Let us make a simple example, assuming that we have the requirements that:
+- each item in the `TablePetstoreFood` table has a `foodName` key;
+- each item in the `TablePetstorePets` table has a `petName` key;
+
+A trivial test case would look like this:
+
+```python
+import pytest
+import boto3
+
+
+endpoint_url = "http://localhost.localstack.cloud:4566"
+
+@pytest.mark.parametrize('tableName,key', [("TablePetstoreFood", "foodName"), ("TablePetstorePets", "petName")])
+def test_database(tableName, key):
+    dynamodb = boto3.client("dynamodb", endpoint_url=endpoint_url, region_name='us-east-1', aws_access_key_id="test",
+                            aws_secret_access_key="test")
+
+    response = dynamodb.scan(TableName=tableName)
+
+    items = response["Items"]
+
+    for item in items:
+        assert key in item
+```
+
+To make this test succeeds, we would need to first put some data in our application. Naturally, such data should be as close as possible to the "production" data. This action is usually called _seeding_ of the testing environment.
+In the next step, we will explore [Cloud Pods](https://docs.localstack.cloud/user-guide/tools/cloud-pods/) as a tool to do such seeding.
+
 ## Cloud Pods
 
 [Cloud Pods](https://docs.localstack.cloud/user-guide/tools/cloud-pods/) are a mechanism that allows you to take a snapshot of the state in your current LocalStack instance, persist it to a storage backend, and easily share it with your team members.
@@ -153,38 +186,114 @@ awslocal dynamodb scan --table-name FoodStoreFoods
 To save your local AWS infrastructure state using Cloud Pods, you can use the `save` command with a desired name for your Cloud Pod as the first argument:
 
 ```bash
-localstack pod save cloud-pod/serverless-api-ecs-apigateway-pod
+localstack pod save <pod-name>
 ```
 
 You can alternatively use the `save` command with a local file path as the first argument to save the Cloud Pod on your local file system and not the LocalStack Web Application:
 
 ```bash
-localstack pod save file://<path_to_disk>/serverless-api-ecs-apigateway-pod
+localstack pod save file://<path_to_disk>/<pod-name>
 ```
 
-The above command will create a zip file named `serverless-api-ecs-apigateway-pod` to the specified location on the disk.
+The above command will create a zip file named `<pod-name>` to the specified location on the disk.
 
 The `load` command is the inverse operation of the `save` command. It retrieves the content of a previously stored Cloud Pod from the local file system or the LocalStack Web Application and injects it into the application runtime. On an alternate machine, start LocalStack with the API key configured, and pull the Cloud Pod we created previously using the `load` command with the Cloud Pod name as the first argument:
 
 ```bash
-localstack pod load serverless-api-ecs-apigateway-pod
+localstack pod load <pod-name>
 ```
 
-Alternatively, you can use load the Cloud Pod with the local file path as the first argument:
+### Generate the seed data
 
-```bash
-localstack pod load file://<path_to_disk>/serverless-api-ecs-apigateway-pod
+Let us now generate some seeding data.
+First, let us restart LocalStack to have a clean instance.
+Then, let us execute the [following script](https://github.com/giograno/serverless-api-ecs-apigateway-sample/tree/main/cloud-pod-seed-tests/table.sh) to simply create the two DynamoDB tables and insert some data.
+
+```
+#!/bin/bash
+
+awslocal dynamodb create-table --cli-input-json file://food.json
+
+awslocal dynamodb create-table --cli-input-json file://pet.json
+
+awslocal dynamodb put-item \
+    --table-name TablePetstorePets \
+    --item '{
+        "petId": {"S": "1"},
+        "petName": {"S": "Dog"} 
+      }' \
+    --return-consumed-capacity TOTAL
+
+
+awslocal dynamodb put-item \
+    --table-name TablePetstoreFood \
+    --item '{
+        "foodId": {"S": "1"},
+        "foodName": {"S": "Cat food"} 
+      }' \
+    --return-consumed-capacity TOTAL    
 ```
 
-To ensure everything is set in place now, follow the previous steps of setting the configuration variables and query the application URL. The state will be restored, and you should be able to see the same data as before.
+Finally, we export a Cloud Pod with the following command:
+
+```
+localstack pod save file://bootstrap
+```
+
+Conceptually, we are now able to:
+
+- start our application;
+- simply seed the test environment with some data;
+- run our unit tests.
+
+In the next step, we will see how to do all this in CI.
+
 
 ## GitHub Action
 
 This application sample hosts an example GitHub Action workflow that starts up LocalStack, deploys the infrastructure, and checks the created resources using `awslocal`. You can find the workflow in the `.github/workflows/main.yml` file. To run the workflow, you can fork this repository and push a commit to the `main` branch.
+
+The most relevant steps in the CI pipeline are:
+
+- Starting LocalStack, after setting the API Key as a secret in GitHub.
+
+```yaml
+      - name: Start LocalStack
+        env:
+          LOCALSTACK_API_KEY: ${{ secrets.LOCALSTACK_API_KEY }}
+          DNS_ADDRESS: 0
+        run: |
+          pip install localstack awscli-local[ver1]
+          pip install terraform-local
+          docker pull localstack/localstack-pro:latest
+
+          # Start LocalStack in the background
+          localstack start -d
+```
+
+- Load the Cloud Pod with the seeding data after starting the application
+
+```yaml
+      - name: Seed test environment with Cloud Pod
+        run: |
+          localstack pod load https://raw.githubusercontent.com/giograno/serverless-api-ecs-apigateway-sample/main/cloud-pods-seed-tests/bootstrap
+          sleep 10
+```
+
+- Finally, run the tests
+
+```yaml
+      - name: Run tests
+        run: |
+          cd tests
+          pip install pytest
+          pip install boto3
+          pytest .
+```
+
 
 Users can adapt this example workflow to run in their own CI environment. LocalStack supports various CI environments, including GitHub Actions, CircleCI, Jenkins, Travis CI, and more. You can find more information about the CI integration in the [LocalStack documentation](https://docs.localstack.cloud/user-guide/ci/).
 
 ## Learn more
 
 The sample application is based on a public [AWS sample app](https://github.com/aws-samples/ecs-apigateway-sample) that deploys ECS containers with API Gateway to connect to. See this AWS blog post for more details:  [Field Notes: Serverless Container-based APIs with Amazon ECS and Amazon API Gateway.](https://aws.amazon.com/blogs/architecture/field-notes-serverless-container-based-apis-with-amazon-ecs-and-amazon-api-gateway/)
-
